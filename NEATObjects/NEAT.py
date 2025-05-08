@@ -1,11 +1,53 @@
 import pickle
 import neat
 import json
+from typing import Optional
+
 from neat.reporting import StdOutReporter
 from neat.statistics import StatisticsReporter
 from neat.checkpoint import Checkpointer
 from neat.nn import FeedForwardNetwork
 from GameObjects.Snake import SnakeGame
+
+from InitialArchitectureObjects.InitalArchitecture import InitialArchitecture
+
+class BalancedEvaluator:
+    def __init__(self, apple_weight: float = 100.0, time_weight: float = 1.0):
+        self.apple_weight = apple_weight
+        self.time_weight = time_weight
+    def evaluate(self, apples: int, time_steps: int) -> float:
+        return apples * self.apple_weight + time_steps * self.time_weight
+
+class TimeDecayEvaluator:
+    def __init__(self, apple_weight: float = 100.0, time_weight: float = 10.0):
+        self.apple_weight = apple_weight
+        self.time_weight = time_weight
+    def evaluate(self, apples: int, time_steps: int) -> float:
+        import math
+        return apples * self.apple_weight + math.sqrt(time_steps) * self.time_weight
+
+class ThresholdTimeEvaluator:
+    def __init__(self, apple_weight: float = 100.0, time_weight: float = 1.0):
+        self.apple_weight = apple_weight
+        self.time_weight = time_weight
+    def evaluate(self, apples: int, time_steps: int) -> float:
+        base = apples * self.apple_weight
+        return base + time_steps * self.time_weight if apples > 0 else base
+
+class ApplePriorityEvaluator:
+    def __init__(self, apple_weight: float = 200.0, time_weight: float = 0.1):
+        self.apple_weight = apple_weight
+        self.time_weight = time_weight
+    def evaluate(self, apples: int, time_steps: int) -> float:
+        return apples * self.apple_weight + time_steps * self.time_weight
+
+# Mapping evaluator names to classes
+EVALUATORS = {
+    'balanced': BalancedEvaluator,
+    'time_decay': TimeDecayEvaluator,
+    'threshold': ThresholdTimeEvaluator,
+    'apple_priority': ApplePriorityEvaluator
+}
 
 class NEATTrainer:
     def __init__(
@@ -13,7 +55,8 @@ class NEATTrainer:
         config_path: str,
         game_train: SnakeGame,
         game_play: SnakeGame,
-        evaluator
+        evaluator,
+        initial_arch: Optional[InitialArchitecture] = None
     ):
         # Load NEAT config
         self.config = neat.Config(
@@ -23,7 +66,11 @@ class NEATTrainer:
             neat.DefaultStagnation,
             config_path
         )
-        # Attach reporter and checkpoint
+        # Apply initial architecture if provided
+        if initial_arch:
+            initial_arch.apply_to_config(self.config)
+
+        # Create population with reporters
         self.pop = neat.Population(self.config)
         self.pop.add_reporter(StdOutReporter(True))
         self.pop.add_reporter(StatisticsReporter())
@@ -34,12 +81,12 @@ class NEATTrainer:
 
         self.game_train = game_train
         self.game_play  = game_play
-        self.evaluator  = evaluator
+        # Instantiate evaluator
+        self.evaluator = evaluator
 
     def eval_genomes(self, genomes, config) -> None:
         for _, genome in genomes:
             net = FeedForwardNetwork.create(genome, config)
-            # Run headless
             self.game_train.reset()
             steps = 0
             while steps < 1000 and not self.game_train.done:
@@ -49,14 +96,12 @@ class NEATTrainer:
                 self.game_train.step(action, render=False)
                 steps += 1
             apples = self.game_train.score
-            fitness = self.evaluator.evaluate(apples, steps)
-            genome.fitness = fitness
+            genome.fitness = self.evaluator.evaluate(apples, steps)
 
     def learn(self, generations: int):
-        winner = self.pop.run(self.eval_genomes, generations)
-        return winner
+        return self.pop.run(self.eval_genomes, generations)
 
-    def play(self, genome, max_steps: int = 1000, render: bool = True, states_path: str = None):
+    def play(self, genome, max_steps: int = 500, render: bool = True, states_path: str = None):
         net = FeedForwardNetwork.create(genome, self.config)
         self.game_play.reset()
         steps = 0

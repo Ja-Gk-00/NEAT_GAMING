@@ -10,64 +10,84 @@ import configparser
 import os
 
 
+from InitialArchitectureObjects.InitalArchitecture import InitialArchitecture
+
 class Experiment:
     def __init__(
         self,
         config_path: str,
         output_dir: str = '.',
-        generations: int = 50
+        generations: int = 225
     ):
         self.config_path = config_path
         self.generations = generations
 
-        # Setup experiment directory
+        # Experiment directory
         cfg_name = os.path.splitext(os.path.basename(config_path))[0]
         self.exp_dir = os.path.join(output_dir, cfg_name)
         os.makedirs(self.exp_dir, exist_ok=True)
 
-        # Paths for genome and state files
+        # Paths
         self.genome_path = os.path.join(self.exp_dir, 'best_genome.pkl')
         self.states_path = os.path.join(self.exp_dir, 'game_states.json')
 
-        # Parse config
+        # Load config
         parser = configparser.ConfigParser()
-        if not parser.read(config_path):
-            raise FileNotFoundError(f"Config not found: {config_path}")
-        # Game section
+        files = parser.read(config_path)
+        if not files:
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+
+        # GAME section
         if 'GAME' not in parser:
-            raise KeyError("Missing [GAME] section in config")
+            raise KeyError("Missing [GAME] section in config file.")
         game_cfg = parser['GAME']
-        gw = game_cfg.getint('grid_width', 30)
-        gh = game_cfg.getint('grid_height', 30)
-        cs = game_cfg.getint('cell_size', 20)
-        gm = game_cfg.getint('game_mode', 1)
-        # Evaluator section
+        gw = game_cfg.getint('grid_width', fallback=30)
+        gh = game_cfg.getint('grid_height', fallback=30)
+        cs = game_cfg.getint('cell_size', fallback=20)
+        gm = game_cfg.getint('game_mode', fallback=1)
+
+        # Instantiate games
+        self.game_train = SnakeGame(gw, gh, cs, gm)
+        self.game_play  = SnakeGame(gw, gh, cs, gm)
+
+        # ARCHITECTURE section
+        arch_path = parser.get('ARCHITECTURE', 'initial_architecture', fallback='').strip()
+        if arch_path:
+            arch_full = arch_path if os.path.isabs(arch_path) else os.path.join(os.path.dirname(config_path), arch_path)
+            self.initial_arch = InitialArchitecture.from_file(arch_full)
+        else:
+            # default: one input per cell, 4 outputs, no hidden
+            input_size = gw * gh
+            self.initial_arch = InitialArchitecture(input_size=input_size, output_size=4)
+
+        # EVALUATOR section
+        if 'EVALUATOR' not in parser:
+            raise KeyError("Missing [EVALUATOR] section in config file.")
         eval_name = parser.get('EVALUATOR', 'name', fallback='balanced')
         if eval_name not in EVALUATORS:
             raise KeyError(f"Unknown evaluator: {eval_name}")
         self.evaluator = EVALUATORS[eval_name]()
 
-        # Create game and trainer
-        self.game_train = SnakeGame(gw, gh, cs, gm)
-        self.game_play  = SnakeGame(gw, gh, cs, gm)
+        # Setup NEAT trainer
         self.trainer = NEATTrainer(
             config_path=self.config_path,
             game_train=self.game_train,
             game_play=self.game_play,
-            evaluator=self.evaluator
+            evaluator=self.evaluator,
+            initial_arch=self.initial_arch
         )
+
         # Redirect NEAT checkpoints
-        from neat.reporting import ReporterSet
-        rs = self.trainer.pop.reporters
-        # remove old
-        old = [r for r in rs.reporters if isinstance(r, Checkpointer)]
+        reporters = self.trainer.pop.reporters.reporters
+        # remove old Checkpointers
+        old = [r for r in reporters if isinstance(r, Checkpointer)]
         for r in old:
-            rs.remove(r)
-        # add new
+            reporters.remove(r)
+        # add new with exp_dir prefix
         prefix = os.path.join(self.exp_dir, 'neat-checkpoint-')
         self.trainer.pop.add_reporter(Checkpointer(generation_interval=10, filename_prefix=prefix))
 
-        # Results placeholders
+        # Results
         self.best_genome: Optional[object] = None
         self.score: Optional[float] = None
         self.states: Optional[list] = None
@@ -75,19 +95,19 @@ class Experiment:
     def run(self) -> float:
         self.best_genome = self.trainer.learn(self.generations)
         self.trainer.save_genome(self.best_genome, self.genome_path)
-        # Evaluate and record states
-        self.score = self.trainer.play(self.best_genome, render=False, states_path=self.states_path)
-        # Load states
-        with open(self.states_path) as f:
+        self.score = self.trainer.play(
+            self.best_genome,
+            render=False,
+            states_path=self.states_path
+        )
+        with open(self.states_path, 'r') as f:
             self.states = json.load(f)
         return self.score
 
     def load_results(self) -> float:
-
         self.best_genome = self.trainer.load_genome(self.genome_path)
-        with open(self.states_path) as f:
+        with open(self.states_path, 'r') as f:
             self.states = json.load(f)
-
         if self.states:
             apples = self.states[-1].get('score', 0)
             steps  = len(self.states)
@@ -96,8 +116,47 @@ class Experiment:
         self.score = self.evaluator.evaluate(apples, steps)
         return self.score
 
-    def replay(self, delay: float = 0.1) -> None:
+    def replay(self, delay: float = 0.2) -> None:
         self.game_play.replay(self.states_path, delay)
+
+    def visualize_architecture(self,
+                               filename: str = 'architecture',
+                               view: bool = True) -> str:
+        
+        if not hasattr(self, 'best_genome') or self.best_genome is None:
+            # attempt to load if we've already run
+            self.best_genome = self.trainer.load_genome(self.genome_path)
+
+        genome = self.best_genome
+        cfg    = self.trainer.config
+        dot = graphviz.Digraph(format='png')
+        dot.attr('graph', rankdir='LR')
+
+        # 1) Add nodes: inputs, outputs, hidden
+        inputs  = cfg.genome_config.input_keys
+        outputs = cfg.genome_config.output_keys
+        for nid in inputs:
+            dot.node(str(nid), shape='circle', style='filled', fillcolor='lightblue', label=f'I{abs(nid)}')
+        for nid in outputs:
+            dot.node(str(nid), shape='doublecircle', style='filled', fillcolor='lightgreen', label=f'O{nid}')
+        # hidden/enabled nodes
+        for nid, node in genome.nodes.items():
+            if nid not in inputs and nid not in outputs:
+                dot.node(str(nid), shape='circle', label=str(nid))
+
+        # 2) Add all enabled connections with weights
+        for cg in genome.connections.values():
+            if not cg.enabled:
+                continue
+            src, dst = cg.key
+            weight = cg.weight
+            dot.edge(str(src), str(dst), label=f'{weight:.2f}', penwidth=str(max(0.1, abs(weight) * 2)))
+
+        # 3) Render to file
+        outpath = os.path.join(self.exp_dir, filename)
+        dot.render(outpath, view=view)
+        # graphviz appends “.png”
+        return outpath + '.png'
 
 
 class BalancedEvaluator:
