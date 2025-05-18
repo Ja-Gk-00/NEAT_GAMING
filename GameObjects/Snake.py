@@ -32,7 +32,7 @@ class Snake:
 
     def direction_one_hot(self) -> List[float]:
         dirs = [UP, RIGHT, DOWN, LEFT]
-        return [1.0 if self.direction==d else 0.0 for d in dirs]
+        return [1.0 if self.direction == d else 0.0 for d in dirs]
 
     def change_direction(self, new_direction: Tuple[int, int]) -> None:
         if (new_direction[0] * -1, new_direction[1] * -1) == self.direction:
@@ -143,16 +143,30 @@ class SnakeGame:
             self._draw()    
 
     def get_state(self) -> List[float]:
-        grid = [0.0] * (self.grid_width * self.grid_height)
-        for x, y in self.snake.body:
-            idx = y * self.grid_width + x
-            if 0 <= idx < len(grid):
-                grid[idx] = -1.0
-        for x, y in self.apples:
-            idx = y * self.grid_width + x
-            if 0 <= idx < len(grid):
-                grid[idx] = 1.0
-        return grid
+        directions = [(0,-1),(1,0),(0,1),(-1,0),(1,-1),(1,1),(-1,1),(-1,-1)]
+        sensors: List[float] = []
+        hx, hy = self.snake.head
+
+        for dx, dy in directions:
+            d_wall = d_body = d_apple = 0.0
+            step = 1
+            while True:
+                x, y = hx + dx*step, hy + dy*step
+                if x<0 or x>=self.grid_width or y<0 or y>=self.grid_height:
+                    d_wall = 1.0/step
+                    break
+                if (x,y) in self.snake.body:  d_body  = 1.0/step
+                if (x,y) in self.apples:      d_apple = 1.0/step
+                step += 1
+            sensors += [d_wall, d_body, d_apple]
+
+        sensors += self.snake.direction_one_hot()
+
+        ax, ay = self.apples[0]
+        sensors.append((ax - hx)/(self.grid_width-1))
+        sensors.append((ay - hy)/(self.grid_height-1))
+
+        return sensors
 
     def _ensure_pygame(self) -> None:
         if not hasattr(self, 'screen'):

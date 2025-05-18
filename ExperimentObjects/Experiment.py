@@ -4,6 +4,16 @@ from NEATObjects.EvalFunc import FitnessEvaluator
 from NEATObjects.NEAT import NEATTrainer
 from GameObjects.Snake import SnakeGame
 from neat.checkpoint import Checkpointer
+import graphviz
+import visualize
+import time
+
+import math
+import pygame
+
+from GameObjects.Snake import UP, DOWN, LEFT, RIGHT
+
+from neat.nn import FeedForwardNetwork
 
 import neat
 import json
@@ -102,6 +112,8 @@ class Experiment:
         )
         with open(self.states_path, 'r') as f:
             self.states = json.load(f)
+
+        self.visualize_training(view=True)
         return self.score
 
     def load_results(self) -> float:
@@ -115,6 +127,36 @@ class Experiment:
             apples, steps = 0, 0
         self.score = self.evaluator.evaluate(apples, steps)
         return self.score
+    
+    def play_genome(self, genome, max_steps: int = 1000, delay: float = 0.2) -> float:
+        if isinstance(genome, str):
+            genome = self.trainer.load_genome(genome)
+
+        score = self.trainer.play(
+            genome,
+            max_steps=max_steps,
+            render=False,
+            states_path=self.states_path
+        )
+        
+        self.game_play.replay(self.states_path, delay)
+
+        return score
+    
+    def get_genome_stats(self, max_steps: int = 100, render: bool = False) -> List[Tuple[neat.DefaultGenome, int, float]]:
+        stats: List[Tuple[neat.DefaultGenome, int, float]] = []
+        for genome in self.trainer.pop.population.values():
+            fit = genome.fitness if genome.fitness is not None else float('-inf')
+            score = self.trainer.play(
+                genome,
+                max_steps=max_steps,
+                render=render,
+                states_path=None
+            )
+            stats.append((genome, score, fit))
+
+        stats.sort(key=lambda t: t[2], reverse=True)
+        return stats
 
     def replay(self, delay: float = 0.2) -> None:
         self.game_play.replay(self.states_path, delay)
@@ -151,8 +193,23 @@ class Experiment:
 
         outpath = os.path.join(self.exp_dir, filename)
         dot.render(outpath, view=view)
-        # graphviz appends “.png”
         return outpath + '.png'
+    
+    def visualize_training(self,
+                           view: bool = True,
+                           ylog: bool = False,
+                           prune_unused: bool = False):
+
+        stats = next(r for r in self.trainer.pop.reporters.reporters
+                     if isinstance(r, neat.StatisticsReporter))
+
+        visualize.plot_stats(stats, ylog=ylog, view=view)
+        visualize.plot_species(stats, view=view)
+
+        visualize.draw_net(self.trainer.config,
+                           self.best_genome,
+                           view=view,
+                           prune_unused=prune_unused)
 
 
 class BalancedEvaluator:
