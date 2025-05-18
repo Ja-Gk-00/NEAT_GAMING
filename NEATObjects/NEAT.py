@@ -1,6 +1,7 @@
 import pickle
 import neat
 import json
+import math
 from typing import Optional
 
 from neat.reporting import StdOutReporter
@@ -89,19 +90,26 @@ class NEATTrainer:
             net = FeedForwardNetwork.create(genome, config)
             self.game_train.reset()
             steps = 0
+            prev_dist = self._distance_to_apple(self.game_train)
+            total_reward = 0.0
             while steps < 1000 and not self.game_train.done:
                 inputs = self.game_train.get_state()
                 outputs = net.activate(inputs)
                 action = int(outputs.index(max(outputs)))
                 self.game_train.step(action, render=False)
                 steps += 1
+                curr_dist = self._distance_to_apple(self.game_train)
+                total_reward += (prev_dist - curr_dist)*0.1
+                prev_dist = curr_dist
+                if self.game_train.score > 0:
+                        total_reward += 5.0
             apples = self.game_train.score
             genome.fitness = self.evaluator.evaluate(apples, steps)
 
     def learn(self, generations: int):
         return self.pop.run(self.eval_genomes, generations)
 
-    def play(self, genome, max_steps: int = 500, render: bool = True, states_path: str = None):
+    def play(self, genome, max_steps: int = 100, render: bool = True, states_path: str = None):
         net = FeedForwardNetwork.create(genome, self.config)
         self.game_play.reset()
         steps = 0
@@ -119,6 +127,12 @@ class NEATTrainer:
             with open(states_path, 'w') as f:
                 json.dump(states, f, indent=2)
         return self.evaluator.evaluate(self.game_play.score, steps)
+
+    def _distance_to_apple(self, game):
+        hx, hy = game.snake.head
+        ax, ay = game.apples[0]
+        return math.hypot(hx-ax, hy-ay)
+
 
     def save_genome(self, genome, path: str) -> None:
         with open(path, 'wb') as f:

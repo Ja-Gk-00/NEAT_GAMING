@@ -1,3 +1,4 @@
+import graphlib
 from typing import List, Tuple, Optional
 from NEATObjects.EvalFunc import FitnessEvaluator
 from NEATObjects.NEAT import NEATTrainer
@@ -53,8 +54,7 @@ class Experiment:
         # ARCHITECTURE section
         arch_path = parser.get('ARCHITECTURE', 'initial_architecture', fallback='').strip()
         if arch_path:
-            arch_full = arch_path if os.path.isabs(arch_path) else os.path.join(os.path.dirname(config_path), arch_path)
-            self.initial_arch = InitialArchitecture.from_file(arch_full)
+            self.initial_arch = InitialArchitecture.from_file(arch_path)
         else:
             # default: one input per cell, 4 outputs, no hidden
             input_size = gw * gh
@@ -129,22 +129,19 @@ class Experiment:
 
         genome = self.best_genome
         cfg    = self.trainer.config
-        dot = graphviz.Digraph(format='png')
+        dot = graphlib.Digraph(format='png')
         dot.attr('graph', rankdir='LR')
 
-        # 1) Add nodes: inputs, outputs, hidden
         inputs  = cfg.genome_config.input_keys
         outputs = cfg.genome_config.output_keys
         for nid in inputs:
             dot.node(str(nid), shape='circle', style='filled', fillcolor='lightblue', label=f'I{abs(nid)}')
         for nid in outputs:
             dot.node(str(nid), shape='doublecircle', style='filled', fillcolor='lightgreen', label=f'O{nid}')
-        # hidden/enabled nodes
         for nid, node in genome.nodes.items():
             if nid not in inputs and nid not in outputs:
                 dot.node(str(nid), shape='circle', label=str(nid))
 
-        # 2) Add all enabled connections with weights
         for cg in genome.connections.values():
             if not cg.enabled:
                 continue
@@ -152,7 +149,6 @@ class Experiment:
             weight = cg.weight
             dot.edge(str(src), str(dst), label=f'{weight:.2f}', penwidth=str(max(0.1, abs(weight) * 2)))
 
-        # 3) Render to file
         outpath = os.path.join(self.exp_dir, filename)
         dot.render(outpath, view=view)
         # graphviz appends “.png”

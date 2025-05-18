@@ -25,9 +25,16 @@ class Snake:
         self.grow_flag: bool = False
         self.grid_width = grid_width
         self.grid_height = grid_height
+    
+    @property
+    def head(self) -> Tuple[int, int]:
+        return self.body[0]
+
+    def direction_one_hot(self) -> List[float]:
+        dirs = [UP, RIGHT, DOWN, LEFT]
+        return [1.0 if self.direction==d else 0.0 for d in dirs]
 
     def change_direction(self, new_direction: Tuple[int, int]) -> None:
-        # Prevent reversing
         if (new_direction[0] * -1, new_direction[1] * -1) == self.direction:
             return
         self.direction = new_direction
@@ -59,8 +66,8 @@ class Snake:
 class SnakeGame:
     def __init__(
         self,
-        grid_width: int = 30,
-        grid_height: int = 30,
+        grid_width: int = 10,
+        grid_height: int = 10,
         cell_size: int = 20,
         game_mode: int = 1
     ):

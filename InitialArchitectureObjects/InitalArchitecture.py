@@ -12,8 +12,8 @@ class InitialArchitecture:
         with open(path, 'r') as f:
             data = json.load(f)
         return cls(
-            input_size=data['input_size'],
-            output_size=data['output_size'],
+            input_size=data['num_inputs'],
+            output_size=data['num_outputs'],
             hidden_layers=data.get('hidden_layers', [])
         )
 
