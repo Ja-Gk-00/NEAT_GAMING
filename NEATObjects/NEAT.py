@@ -101,7 +101,7 @@ class NEATTrainer:
     def learn(self, generations: int):
         return self.pop.run(self.eval_genomes, generations)
 
-    def play(self, genome, max_steps: int = 500, render: bool = True, states_path: str = None):
+    def play(self, genome, max_steps: int = 250, render: bool = True, states_path: str = None):
         net = FeedForwardNetwork.create(genome, self.config)
         self.game_play.reset()
         steps = 0

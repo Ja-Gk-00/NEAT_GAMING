@@ -3,7 +3,7 @@ import configparser
 import argparse
 from typing import List, Tuple
 
-grid_sizes: List[Tuple[int,int]] = [(5,5), (10,10), (30,30)]
+grid_sizes: List[Tuple[int,int]] = [(7,7)]
 weight_mut_rates = [0.3, 0.5, 0.9] 
 node_mut_rates = [0.05, 0.1, 0.25] 
 survival_thresholds = [0.85, 0.65, 0.25] 
