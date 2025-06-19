@@ -28,7 +28,7 @@ class Experiment:
         self,
         config_path: str,
         output_dir: str = '.',
-        generations: int = 225
+        generations: int = 600
     ):
         self.config_path = config_path
         self.generations = generations
