@@ -175,6 +175,5 @@ cython_debug/
 
 
 # Project ignore
-**/config_* 
 
 Saved_outputs/
