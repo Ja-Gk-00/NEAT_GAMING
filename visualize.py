@@ -104,9 +104,9 @@ def plot_species(statistics, view=False, filename='speciation.svg'):
 
     plt.savefig(filename)
 
+    plt.savefig(filename)
     if view:
         plt.show()
-
     plt.close()
 
 

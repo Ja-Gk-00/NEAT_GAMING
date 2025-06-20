@@ -6,17 +6,51 @@ from multiprocessing import Pool, cpu_count
 import traceback
 
 # Załóżmy, że ExperimentObjects.Experiment jest importowalne
-# (jak w poprzedniej wersji)
 from ExperimentObjects.Experiment import Experiment
 
 
-# --- Funkcja do uruchamiania pojedynczego eksperymentu (bez zmian) ---
+def is_experiment_completed(config_file_path: str, base_results_dir: str) -> bool:
+    """
+    Sprawdza czy eksperyment dla danej konfiguracji został już ukończony.
+    Zwraca True jeśli eksperyment został ukończony, False w przeciwnym razie.
+    """
+    config_name = os.path.splitext(os.path.basename(config_file_path))[0]
+    exp_dir = os.path.join(base_results_dir, config_name)
+
+    # Sprawdź czy folder eksperymentu istnieje
+    if not os.path.isdir(exp_dir):
+        return False
+
+    # Sprawdź czy istnieją kluczowe pliki wynikowe
+    genome_file = os.path.join(exp_dir, 'best_genome.pkl')
+    states_file = os.path.join(exp_dir, 'game_states.json')
+
+    return os.path.isfile(genome_file) and os.path.isfile(states_file)
+
+
 def run_experiment_for_config(
-    config_file_path: str,
-    base_results_dir: str,
-    generations_count: int,
+        config_file_path: str,
+        base_results_dir: str,
+        generations_count: int,
 ) -> tuple[str, float | None, str | None]:
     config_name = os.path.splitext(os.path.basename(config_file_path))[0]
+
+    # Sprawdź czy eksperyment już został ukończony
+    if is_experiment_completed(config_file_path, base_results_dir):
+        print(f"Eksperyment dla konfiguracji {config_name} już został ukończony. Pomijam...")
+        try:
+            # Załaduj istniejące wyniki
+            exp = Experiment(
+                config_path=config_file_path,
+                output_dir=base_results_dir,
+                generations=generations_count,
+            )
+            final_fitness = exp.load_results()
+            return config_name, final_fitness, exp.states_path
+        except Exception as e:
+            print(f"Błąd podczas ładowania wyników dla {config_name}: {e}")
+            print("Eksperyment zostanie uruchomiony ponownie...")
+
     print(f"Rozpoczynanie eksperymentu dla konfiguracji: {config_name}...")
     try:
         exp = Experiment(
@@ -53,12 +87,28 @@ def run_experiment_for_config(
         return config_name, None, None
 
 
+def get_experiment_progress(config_files_list: list, base_results_dir: str) -> tuple[list, list]:
+    """
+    Sprawdza postęp eksperymentów i zwraca listy ukończonych i pozostałych do wykonania.
+    """
+    completed_configs = []
+    remaining_configs = []
+
+    for config_path in config_files_list:
+        if is_experiment_completed(config_path, base_results_dir):
+            completed_configs.append(config_path)
+        else:
+            remaining_configs.append(config_path)
+
+    return completed_configs, remaining_configs
+
+
 # --- Główna część skryptu ---
 if __name__ == "__main__":
     # Ustawienia
     configs_folder_name = "Configs"
     results_main_dir = "experiment_results_parallel"
-    num_generations_per_exp = 225
+    num_generations_per_exp = 1000  # Zmieniono z 225 na 1000
 
     os.makedirs(results_main_dir, exist_ok=True)
 
@@ -66,14 +116,10 @@ if __name__ == "__main__":
     try:
         # Preferowana metoda, jeśli uruchamiane jako skrypt .py
         current_script_directory = os.path.dirname(os.path.abspath(__file__))
-        # Zakładamy, że skrypt jest w głównym katalogu projektu
         project_root_dir = current_script_directory
-        # Jeśli skrypt byłby w podkatalogu (np. NEAT_GAMING/Scripts/):
-        # project_root_dir = os.path.abspath(os.path.join(current_script_directory, ".."))
         print(f"Użyto __file__ do określenia project_root_dir: {project_root_dir}")
     except NameError:
         # Fallback dla środowisk interaktywnych (np. Jupyter Notebook)
-        # Zakłada, że bieżący katalog roboczy to katalog główny projektu.
         project_root_dir = os.getcwd()
         print(
             f"OSTRZEŻENIE: __file__ nie jest zdefiniowane. Użyto os.getcwd() jako project_root_dir: {project_root_dir}"
@@ -100,32 +146,71 @@ if __name__ == "__main__":
         os.path.abspath(cfp) for cfp in config_files_relative_or_absolute
     ]
 
-    print(
-        f"Znaleziono {len(config_files_list)} plików konfiguracyjnych do przetworzenia."
-    )
-    for i, cfp in enumerate(config_files_list[:3]):
-        print(f"  Przykład pliku konfiguracyjnego {i+1}: {cfp}")
+    print(f"Znaleziono {len(config_files_list)} plików konfiguracyjnych.")
 
-    tasks = [
-        (cfp, results_main_dir, num_generations_per_exp)
-        for cfp in config_files_list
-    ]
+    # Sprawdź postęp eksperymentów
+    completed_configs, remaining_configs = get_experiment_progress(config_files_list, results_main_dir)
 
-    num_processes_to_use = min(len(config_files_list), cpu_count())
-    print(
-        f"Uruchamianie {len(tasks)} eksperymentów równolegle przy użyciu {num_processes_to_use} procesów..."
-    )
+    print(f"Ukończone eksperymenty: {len(completed_configs)}")
+    print(f"Pozostałe eksperymenty do wykonania: {len(remaining_configs)}")
 
-    start_timestamp = time.time()
+    if completed_configs:
+        print("Przykłady ukończonych eksperymentów:")
+        for i, cfp in enumerate(completed_configs[:3]):
+            config_name = os.path.splitext(os.path.basename(cfp))[0]
+            print(f"  {i + 1}. {config_name}")
 
-    with Pool(processes=num_processes_to_use) as pool:
-        results_data = pool.starmap(run_experiment_for_config, tasks)
+    if not remaining_configs:
+        print("Wszystkie eksperymenty zostały już ukończone!")
 
-    end_timestamp = time.time()
-    print(f"\n--- Wszystkie eksperymenty zakończone ---")
-    print(
-        f"Całkowity czas przetwarzania: {end_timestamp - start_timestamp:.2f} sekund."
-    )
+        # Wczytaj wyniki ukończonych eksperymentów
+        print("\n--- Ładowanie wyników ukończonych eksperymentów ---")
+        tasks = [
+            (cfp, results_main_dir, num_generations_per_exp)
+            for cfp in completed_configs
+        ]
+
+        with Pool(processes=min(len(completed_configs), cpu_count())) as pool:
+            results_data = pool.starmap(run_experiment_for_config, tasks)
+    else:
+        print(f"\nRozpoczynam przetwarzanie {len(remaining_configs)} pozostałych eksperymentów...")
+
+        tasks = [
+            (cfp, results_main_dir, num_generations_per_exp)
+            for cfp in remaining_configs
+        ]
+
+        num_processes_to_use = min(len(remaining_configs), cpu_count())
+        print(
+            f"Uruchamianie {len(tasks)} eksperymentów równolegle przy użyciu {num_processes_to_use} procesów..."
+        )
+
+        start_timestamp = time.time()
+
+        with Pool(processes=num_processes_to_use) as pool:
+            remaining_results = pool.starmap(run_experiment_for_config, tasks)
+
+        end_timestamp = time.time()
+        print(f"\n--- Pozostałe eksperymenty zakończone ---")
+        print(
+            f"Czas przetwarzania pozostałych eksperymentów: {end_timestamp - start_timestamp:.2f} sekund."
+        )
+
+        # Wczytaj również wyniki już ukończonych eksperymentów
+        print("\n--- Ładowanie wyników wcześniej ukończonych eksperymentów ---")
+        completed_tasks = [
+            (cfp, results_main_dir, num_generations_per_exp)
+            for cfp in completed_configs
+        ]
+
+        if completed_tasks:
+            with Pool(processes=min(len(completed_configs), cpu_count())) as pool:
+                completed_results = pool.starmap(run_experiment_for_config, completed_tasks)
+            results_data = remaining_results + completed_results
+        else:
+            results_data = remaining_results
+
+    print(f"\n--- Wszystkie eksperymenty przetworzone ---")
 
     print("\n--- Podsumowanie wyników ---")
     successful_exp_results = []
@@ -141,18 +226,18 @@ if __name__ == "__main__":
     if successful_exp_results:
         successful_exp_results.sort(key=lambda x: x[1], reverse=True)
 
-    print("\n--- Najlepsze konfiguracje (Top 5) ---")
+    print("\n--- Najlepsze konfiguracje (Top 10) ---")
     if not successful_exp_results:
         print("Brak udanych eksperymentów do wyświetlenia.")
     else:
         for i, (name, fitness_val, _) in enumerate(
-            successful_exp_results[:5]
+                successful_exp_results[:10]  # Zwiększono z 5 do 10
         ):
-            print(f"{i+1}. {name}: Fitness = {fitness_val:.2f}")
+            print(f"{i + 1}. {name}: Fitness = {fitness_val:.2f}")
 
     if successful_exp_results:
-        best_cfg_name, _, best_states_file = successful_exp_results[0]
-        print(f"\n--- Odtwarzanie najlepszego eksperymentu ({best_cfg_name}) ---")
+        best_cfg_name, best_fitness, best_states_file = successful_exp_results[0]
+        print(f"\n--- Najlepszy eksperyment: {best_cfg_name} (Fitness: {best_fitness:.2f}) ---")
 
         original_config_file_for_replay = None
         for cfp_abs in config_files_list:
@@ -161,43 +246,32 @@ if __name__ == "__main__":
                 break
 
         if original_config_file_for_replay:
-            print(
-                f"Oryginalny plik konfiguracyjny: {original_config_file_for_replay}"
-            )
+            print(f"Oryginalny plik konfiguracyjny: {original_config_file_for_replay}")
             print(f"Plik stanów gry: {best_states_file}")
-            print(f"\nAby odtworzyć ręcznie (przykład):")
+            print(f"\nAby odtworzyć najlepszy eksperyment:")
             print(
-                f"  exp_replayer = Experiment(config_path='{original_config_file_for_replay}', output_dir='{results_main_dir}')"
-            )
-            print(f"  if '{best_states_file}' and os.path.exists('{best_states_file}'):")
-            print(
-                f"      exp_replayer.game_play.replay('{best_states_file}', delay=0.05)"
-            )
-            print(f"  else: print('Plik stanów gry {best_states_file} nie istnieje lub jest pusty.')")
+                f"  exp_replayer = Experiment(config_path='{original_config_file_for_replay}', output_dir='{results_main_dir}')")
+            print(f"  exp_replayer.replay()")
 
-            try:
-                print(
-                    f"\nAutomatyczne odtwarzanie najlepszego wyniku dla: {best_cfg_name}..."
-                )
-                exp_replayer_auto = Experiment(
-                    config_path=original_config_file_for_replay,
-                    output_dir=results_main_dir,
-                )
-                if best_states_file and os.path.exists(best_states_file):
-                    exp_replayer_auto.game_play.replay(best_states_file, delay=0.05)
-                else:
-                    print(
-                        f"Nie można znaleźć pliku stanów gry do automatycznego odtworzenia: {best_states_file}"
+            # Opcjonalnie: automatyczne odtworzenie
+            user_input = input("\nCzy chcesz automatycznie odtworzyć najlepszy eksperyment? (y/n): ")
+            if user_input.lower() in ['y', 'yes', 't', 'tak']:
+                try:
+                    print(f"\nAutomatyczne odtwarzanie najlepszego wyniku dla: {best_cfg_name}...")
+                    exp_replayer_auto = Experiment(
+                        config_path=original_config_file_for_replay,
+                        output_dir=results_main_dir,
                     )
-            except Exception as e:
-                print(f"Błąd podczas próby automatycznego odtworzenia: {e}")
-                traceback.print_exc()
+                    if best_states_file and os.path.exists(best_states_file):
+                        exp_replayer_auto.replay(delay=0.05)
+                    else:
+                        print(f"Nie można znaleźć pliku stanów gry: {best_states_file}")
+                except Exception as e:
+                    print(f"Błąd podczas automatycznego odtworzenia: {e}")
+                    traceback.print_exc()
         else:
-            print(
-                f"Nie udało się znaleźć oryginalnego pliku .ini dla najlepszej konfiguracji '{best_cfg_name}' do odtworzenia."
-            )
+            print(f"Nie udało się znaleźć oryginalnego pliku .ini dla '{best_cfg_name}'")
     else:
         print("\nBrak udanych eksperymentów, więc nie ma czego odtwarzać.")
 
     print("\nGotowe.")
-

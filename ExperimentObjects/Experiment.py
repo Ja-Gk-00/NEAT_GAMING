@@ -194,7 +194,7 @@ class Experiment:
         outpath = os.path.join(self.exp_dir, filename)
         dot.render(outpath, view=view)
         return outpath + '.png'
-    
+
     def visualize_training(self,
                            view: bool = True,
                            ylog: bool = False,
@@ -203,13 +203,34 @@ class Experiment:
         stats = next(r for r in self.trainer.pop.reporters.reporters
                      if isinstance(r, neat.StatisticsReporter))
 
-        visualize.plot_stats(stats, ylog=ylog, view=view)
-        visualize.plot_species(stats, view=view)
+        # Ścieżki do plików w folderze eksperymentu
+        fitness_path = os.path.join(self.exp_dir, 'avg_fitness.svg')
+        species_path = os.path.join(self.exp_dir, 'speciation.svg')
+        network_path = os.path.join(self.exp_dir, 'network_diagram')
 
-        visualize.draw_net(self.trainer.config,
-                           self.best_genome,
-                           view=view,
-                           prune_unused=prune_unused)
+        print(f"Zapisywanie grafów do: {self.exp_dir}")  # Debug
+
+        try:
+            visualize.plot_stats(stats, ylog=ylog, view=view, filename=fitness_path)
+            print(f"✓ Zapisano: {fitness_path}")
+        except Exception as e:
+            print(f"✗ Błąd plot_stats: {e}")
+
+        try:
+            visualize.plot_species(stats, view=view, filename=species_path)
+            print(f"✓ Zapisano: {species_path}")
+        except Exception as e:
+            print(f"✗ Błąd plot_species: {e}")
+
+        try:
+            visualize.draw_net(self.trainer.config,
+                               self.best_genome,
+                               view=view,
+                               filename=network_path,
+                               prune_unused=prune_unused)
+            print(f"✓ Zapisano: {network_path}.svg")
+        except Exception as e:
+            print(f"✗ Błąd draw_net: {e}")
 
 
 class BalancedEvaluator:
